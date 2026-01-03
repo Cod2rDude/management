@@ -1,0 +1,60 @@
+{
+	"name": "management",
+	"tree": {
+		"$className": "DataModel",
+		"ReplicatedStorage": {
+			"replicated": {
+				"$className": "Folder",
+				"packages": {
+					"$className": "Folder",
+					"queues": {
+						"$properties": {
+							"Attributes": {
+								"version": {
+									"String": "1.0.0"
+								}
+							}
+						},
+						"$path": "packages/queues/src/__index.luau",
+						"libs": {
+							"$path": "packages/queues/src/libs"
+						},
+						"log": {
+							"$path": "packages/queues/src/__log__"
+						}
+					}
+				}
+			}
+		},
+		"ServerScriptService": {
+			"server": {
+				"$className": "Folder",
+				"management": {
+					"$properties": {
+						"Attributes": {
+							"version": {
+								"String": "0.0.2"
+							}
+						}
+					},
+					"$path": "src/__index.luau",
+					"__main__": {
+						"$path": "src/__main__.luau"
+					},
+					"__config": {
+						"$path": "src/__config.luau"
+					},
+					"libs": {
+						"$path": "src/libs"
+					},
+					"__log__": {
+						"$path": "src/__log__"
+					},
+					"global": {
+						"$path": "src/global"
+					}
+				}
+			}
+		}
+	}
+}
