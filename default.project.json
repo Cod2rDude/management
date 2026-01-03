@@ -27,6 +27,7 @@
 			}
 		},
 		"ServerScriptService": {
+			"actors": {"$className":"Folder"},
 			"server": {
 				"$className": "Folder",
 				"management": {

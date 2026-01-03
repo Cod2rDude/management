@@ -136,4 +136,11 @@ return {
 			[2] = "Succesfully stopped.";
 		};
 	};
+	[0x14] = {
+		type = "log";
+		message = {
+			[1] = "Scheduler";
+			[2] = "Succesfully added task to schedule.";
+		};
+	};
 }
