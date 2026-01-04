@@ -13,7 +13,7 @@
 </div>
 
 ## Why does this even exist?
-I like giving myself headaches.
+I like giving myself headaches. its wip btw
 
 ## Features
 
