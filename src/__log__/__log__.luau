@@ -3,9 +3,9 @@
 	* @file		: __log__.lua
 	* @author	: Cod2rDude & Scpt2r
 	* @date		: April 26 2025
-	* @lastEdit	: December 23 2025 @ 20:10
+	* @lastEdit	: January 5 @ 23:07
 	* @brief	: Customizable logging lib with cache and customization.
-	* @version	: 1.2.0
+	* @version	: 1.2.1
 	******************************************************************************
 	* @attention
 	*
@@ -62,15 +62,15 @@ local log = {}
 log.cache = {}
 
 --// Lib Functions
-function log.new(id:number, extra:{string})
-	if _messages[id] == nil then log.new(cantFindMessageErr, {"Id:", tostring(id)}) return end
+function log.new(id:number, extra:{string}|string)
+	if _messages[id] == nil then log.new(cantFindMessageErr, {"Id:", tostring(id)}); return end
 	if extra == {} then extra = "" end
 
 	local baseplate = _config.index .. _config.spacing
 	local message = baseplate
 
 	for i, v in pairs(_messages[id].message) do 
-		if type(v) ~= "string" then log.new(messageIsntAStringErr, {"Message: ", tostring(v)}) continue end
+		if type(v) ~= "string" then log.new(messageIsntAStringErr, {"Message: ", tostring(v)}); continue end
 
 		message = message .. v  .. (i == #_messages[id].message and " " or _config.spacing)
 	end
@@ -99,7 +99,7 @@ function log.new(id:number, extra:{string})
 	elseif _messages[id].type == "warning" then
 		warn(message)
 	elseif _messages[id].type == "error" then
-		if _messages[id].level == nil then log.new(errDoesntIncludeLevelErr) return end
+		if _messages[id].level == nil then log.new(errDoesntIncludeLevelErr, {}); return end
 		error(message, _messages[id].level)
 	end
 

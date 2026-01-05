@@ -1,15 +1,16 @@
 --!strict
 --!native
 --!optimize 2
+--!nolint LocalUnused
 
 --[[
 	******************************************************************************
-	* @file		: .../management/libs/scheduler.lua
+	* @file		: .../management/src/libs/scheduler.lua
 	* @author	: Cod2rDude
 	* @date		: December 31 2025
-	* @lastEdit	: January 3 2025 @ 19:42
+	* @lastEdit	: January 5 2025 @ 23:35
 	* @brief	: Scheduler for scheduling tasks per tick.
-	* @version	: 1.0.0
+	* @version	: 1.5.0
 	******************************************************************************
 	* @attention
 	*
@@ -63,26 +64,30 @@ local PRIORITY_MAX					= MAX_EPHEMERAL_QUEUE_LIMIT
 --// Variables
 local amIRunning					= false
 local tickCountInPrevFrame			= -1
+local taskCounter					= 0
 
 local actors						= serverScriptService.server.actors
 
 local executors						=
 {
 	[1]								= function(obj : customTask, ct : number)
-		local success, _ = pcall(obj.callbackOrActor, ct)
+		if typeof(obj.callbackOrActor) ~= "function" then return end
+
+		local success, err = pcall(obj.callbackOrActor, ct)
 
 		if not success then
 			-- gotAnErrorWhileExecutingTask
-			__log__.new(0x15, {_})
+			__log__.new(0x15, {err :: string})
 		end
 	end,
 	[2]								= function(obj : customTask, ct : number)
+		if typeof(obj.callbackOrActor) ~= "function" then return end
 		--TODO: Promises
 		task.spawn(obj.callbackOrActor, ct)
 	end,
 	[3]								= function(obj : customTask, ct : number)
-		if type(obj.callbackOrActor) == "string" and actors[obj.callback] and actors[obj.callback]:IsA("Actor") then
-			local actor = actors[obj.callback] :: Actor
+		if type(obj.callbackOrActor) == "string" and actors[obj.callbackOrActor] and actors[obj.callbackOrActor]:IsA("Actor") then
+			local actor = actors[obj.callbackOrActor] :: Actor
 			actor:SendMessage("work", ct)
 		end
 	end
@@ -113,25 +118,30 @@ local succesfullyAddedTaskToSchedule= 0x14
 local gotAnErrorWhileExecutingTask	= 0x15
 local cantAddEphemeralTask			= 0x16
 local wrongTaskOperationType		= 0x17
-local r1							= 0x18
-local r2							= 0x19
-local r3							= 0x1A
-local r4							= 0x1B
-local r5							= 0x1C
-local r6							= 0x1D
-local r7							= 0x1E
-local r8							= 0x1F
+--local r1							= 0x18
+--local r2							= 0x19
+--local r3							= 0x1A
+--local r4							= 0x1B
+--local r5							= 0x1C
+--local r6							= 0x1D
+--local r7							= 0x1E
+--local r8							= 0x1F
+-- go to local r1, press ctrl+v, go to local r8, press I, press - twice
 
 --// Functions
 function taskOperationTypeToExecutorsIndex(taskOperationType: number)
-	return toToEI_lookupTable[taskOperationType] and toToEI_lookupTable[taskOperationType] or 1
+	return toToEI_lookupTable[taskOperationType] and toToEI_lookupTable[taskOperationType] or -1
 end
 
 function insert<T>(t : {}, v : any)
-	if not v then return end
+	if not v then return 1 end
 	local i = #t+1
 	t[i] = v
 	return i
+end
+
+function swap(t : {}, i : number, j : number)
+	t[i], t[j] = t[j], t[i]
 end
 
 --// Lib Decleration
@@ -145,6 +155,16 @@ scheduler.inputRequests				= {}
 scheduler.remoteEvents				= {}
 
 --// Lib Local Functions (Essentialy require variables above)
+function createNewTickBucket(n)
+	scheduler.tasksByNextRunTickAndType[n] = {} 
+	return scheduler.tasksByNextRunTickAndType[n]
+end
+
+function createNewOperationBucket(n, j)
+	scheduler.tasksByNextRunTickAndType[n][j] = {}
+	return scheduler.tasksByNextRunTickAndType[n][j]
+end
+
 function processInputRequests()
 	
 end
@@ -156,7 +176,7 @@ end
 function processEphemeralTasks(ct : number)
 	if scheduler.ephemeralTasks:isEmpty() then return end
 
-	for i = 1, math.min(MAX_EPHEMERAL_TASKS_PER_TICK, #scheduler.ephemeralTasks:size()), 1 do
+	for i = 1, math.min(MAX_EPHEMERAL_TASKS_PER_TICK, scheduler.ephemeralTasks:size()), 1 do
 		local removedTask : customTask = scheduler.ephemeralTasks:dequeue()
 
 		executors[taskOperationTypeToExecutorsIndex(removedTask.operationType)](removedTask, ct)
@@ -166,22 +186,14 @@ end
 function processTasksWithInterval(ct : number)
 	if not scheduler.tasksByNextRunTickAndType[ct] then return end
 
-	local function createNewTickBucket(n)
-		scheduler.tasksByNextRunTickAndType[n] = {}
-	end
-
-	local function createNewOperationBucket(n, j)
-		scheduler.tasksByNextRunTickAndType[n][j] = {}
-	end
-
 	local taskBucketForThisTick = scheduler.tasksByNextRunTickAndType[ct]
 
-	for i = 1, #enum.taskOperationType do
-		if not taskBucketForThisTick[i] then continue end
-		local taskBucketForOperationTypes = taskBucketForThisTick[i]
+	for i : number, taskBucketForOperationTypes : {{number}} in taskBucketForThisTick do
 		if #taskBucketForOperationTypes == 0 then continue end
 
-		local executor = executors[taskOperationTypeToExecutorsIndex(i)]
+		local executorIndex = taskOperationTypeToExecutorsIndex(i)
+		if executorIndex <= 0 then continue end
+		local executor = executors[executorIndex]
 
 		for j = 1, #taskBucketForOperationTypes do
 			local indexData = taskBucketForOperationTypes[j]
@@ -217,31 +229,45 @@ function onEveryFrame(ticksInThisFrame : number)
 	
 	local internalAccumulator = tickCountInPrevFrame
 	
-	for i = 1, difference do
-		internalAccumulator += 1
-		print(internalAccumulator)
-		
-		--[[
-			## Schedule
-			1. Input Requests
-			2. Remote Events
-			3. Ephemeral Tasks
-			4. Tasks That Run Every Tick
-			5. Tasks That Run Every x Tick
+	if not didWeSkipTicks then
+		for i = 1, difference do
+			internalAccumulator += 1
+			print(internalAccumulator)
 
-			Essentialy 4 & 5 is same
-		]]
+			--[[
+				## Schedule
+				1. Input Requests
+				2. Remote Events
+				3. Ephemeral Tasks
+				4. Tasks That Run Every Tick
+				5. Tasks That Run Every x Tick
+
+				Essentialy 4 & 5 is same
+			]]
 		
-		processInputRequests()
-		processRemoteEvents()
-		processEphemeralTasks(internalAccumulator)
-		processTasksWithInterval(internalAccumulator)
+			processInputRequests()
+			processRemoteEvents()
+			processEphemeralTasks(internalAccumulator)
+			processTasksWithInterval(internalAccumulator)
+		end
+	else
+		local last = 0
+		local nextFrameStartTick = ticksInThisFrame + 1
+		local startIndex = tickCountInPrevFrame + 1
+		local endIndex = ticksInThisFrame - 1
+
+		for i = startIndex, endIndex do -- reschedule sh*t
+			if not scheduler.tasksByNextRunTickAndType[i] then last+=1; continue end
+
+			--swap(scheduler.tasksByNextRunTickAndType, i, nextFrameStartTick + last)
+			-- im dumb asf
+
+			
+
+			last+=1
+		end
 	end
-	
-	if didWeSkipTicks then
-		-- reschedule
-	end
-	
+
 	tickCountInPrevFrame = ticksInThisFrame
 end
 
@@ -261,36 +287,38 @@ end
 ]]
 scheduler.addTask					= function(
 	taskOperationType_ : number,
-	callbackOrActorName_ : (ct : number, ...any) -> (...any?) | string,
+	callbackOrActor_ : (ct : number, ...any) -> (...any?) | string,
 	interval_ : number, priority_ : number?
 ) : string?
 	local isMyIntervalLessOrEqualToZero = interval_ <= 0
 
 	--TODO: log here
 
-	if isMyIntervalLessOrEqualToZero and #scheduler.ephemeralTasks >= MAX_EPHEMERAL_QUEUE_LIMIT then
+	if isMyIntervalLessOrEqualToZero and scheduler.ephemeralTasks:size() >= MAX_EPHEMERAL_QUEUE_LIMIT then
 		__log__.new(cantAddEphemeralTask, {})
 		return nil
 	end
 
-	if taskOperationType_ < 1 or taskOperationType_ > #enum.taskOperationType then
+	if taskOperationType_ < 1 or taskOperationType_ > enum.taskOperationType.__count then
 		__log__.new(wrongTaskOperationType, {tostring(taskOperationType_)})
 		return nil
 	end
 
 	-- i need a priority queue that lets me look at object with x'nd priority without removing it.
 
+	taskCounter += 1
+
 	local self				= {
-		id					= "task"..time(), -- why?
+		id					= "task"..tostring(taskCounter),
 		operationType		= taskOperationType_,
 		interval			= math.max(interval_, 0),
-		callbackOrActorName	= callbackOrActorName_,
+		callbackOrActor		= callbackOrActor_,
 	} :: customTask
 
 	if isMyIntervalLessOrEqualToZero then
 		priority_ = math.clamp(priority_ and priority_ or DEFAULT_PRIORITY, PRIORITY_MIN, PRIORITY_MAX)
 
-		scheduler.ephemeralTasks:enqueue(self, priority_)
+		scheduler.ephemeralTasks:enqueue(self, priority_ :: number)
 	else
 		local firstRun = tickManager.getCurrentTicks() + self.interval + 1
 
@@ -304,7 +332,7 @@ scheduler.addTask					= function(
 		)
 
 		if not scheduler.tasksByNextRunTickAndType[firstRun] then
-			scheduler.tasksByNextRunTickAndType[self.interval] = {}
+			scheduler.tasksByNextRunTickAndType[firstRun] = {}
 		end
 		if not scheduler.tasksByNextRunTickAndType[firstRun][self.operationType] then
 			scheduler.tasksByNextRunTickAndType[firstRun][self.operationType] = {}

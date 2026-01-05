@@ -4,12 +4,12 @@
 
 --[[
 	******************************************************************************
-	* @file		: .../management/libs/tickManager.lua
+	* @file		: .../management/src/libs/tickManager.lua
 	* @author	: Cod2rDude
 	* @date		: December 23 2025
-	* @lastEdit	: December 31 2025 @ 21:16
+	* @lastEdit	: January 5 2025 @ 22:57
 	* @brief	: Tick counter for managing tasks on the server.
-	* @version	: 1.1.0
+	* @version	: 1.1.5
 	******************************************************************************
 	* @attention
 	*
@@ -25,18 +25,18 @@
 
 --// Services
 local runService			= game:GetService("RunService")
-local serverScriptService	= game:GetService("ServerScriptService")
+--local serverScriptService	= game:GetService("ServerScriptService")
 
 --// Libs
-local __log__				= require(script.Parent.Parent.src.__log__.__log__)
-local config				= require(script.Parent.Parent.src.__config)
+local __log__				= require(script.Parent.Parent.__log__.__log__)
+local config				= require(script.Parent.Parent.__config)
 
 --// CONSTANTS
 local SOFTSTART_FRAMES		= 1024
 local MIN_TPS				= 10
 local MAX_TPS				= 60
 local DEFAULT_TPS			= 20
-local MAX_TICKS_PER_FRAME	= math.floor(MAX_TPS/6 + 1) -- deprecated.
+--local MAX_TICKS_PER_FRAME	= math.floor(MAX_TPS/6 + 1) -- deprecated.
 
 --// Variables
 local amIRunning			= false -- (¬_¬)
@@ -120,11 +120,10 @@ tickManager.init			= function(softstart : boolean) : boolean
 		while accumulated >= rate do
 			accumulated -= rate
 			ticksCountedInThisFrame += 1
+			currentTicks += 1
 		end
 		
 		if ticksCountedInThisFrame > 0 then
-			currentTicks += ticksCountedInThisFrame
-			
 			--[[
 			-- Are there any other ways to do this.
 			-- This seems like a bad approach,
