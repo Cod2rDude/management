@@ -13,7 +13,13 @@
 </div>
 
 ## Why does this even exist?
-I like giving myself headaches.
+I like giving myself headaches. its wip btw
+
+* instead of time use a counter
+* use next instead of #
+* dont run anything when a lag happens simply double it and give it to next frame
+* you dont return anything when creating a new bucket lol 🤣
+* create a table for tasks that will run no matter what
 
 ## Features
 
