@@ -1,16 +1,16 @@
 --!strict
 --!native
 --!optimize 2
---!nolint LocalUnused
+--
 
 --[[
 	******************************************************************************
 	* @file		: .../management/src/libs/scheduler.lua
 	* @author	: Cod2rDude
 	* @date		: December 31 2025
-	* @lastEdit	: January 5 2025 @ 23:35
+	* @lastEdit	: January 6 2025 @ 13:53
 	* @brief	: Scheduler for scheduling tasks per tick.
-	* @version	: 1.5.0
+	* @version	: 1.5.1
 	******************************************************************************
 	* @attention
 	*
@@ -50,7 +50,6 @@ local types							= require(script.Parent.Parent.global.types)
 
 local packages						= replicatedStorage.replicated.packages
 local queues						= require(packages.queues)
-local queues_fifo					= queues.fifo
 local queues_priorityMax			= queues.priorityMax
 
 --// Constants
@@ -149,8 +148,7 @@ local scheduler						= {}
 
 --// Lib Variables
 scheduler.ephemeralTasks			= queues_priorityMax.new(MAX_EPHEMERAL_QUEUE_LIMIT)
-scheduler.tasksByIntervals			= {}
-scheduler.tasksByNextRunTickAndType	= {}
+scheduler.tasksByNextRunTickAndType	= {} -- idk if this was a good way.
 scheduler.inputRequests				= {}
 scheduler.remoteEvents				= {}
 
@@ -188,7 +186,7 @@ function processTasksWithInterval(ct : number)
 
 	local taskBucketForThisTick = scheduler.tasksByNextRunTickAndType[ct]
 
-	for i : number, taskBucketForOperationTypes : {{number}} in taskBucketForThisTick do
+	for i : number, taskBucketForOperationTypes : {{customTask}} in pairs(taskBucketForThisTick) do
 		if #taskBucketForOperationTypes == 0 then continue end
 
 		local executorIndex = taskOperationTypeToExecutorsIndex(i)
@@ -196,21 +194,24 @@ function processTasksWithInterval(ct : number)
 		local executor = executors[executorIndex]
 
 		for j = 1, #taskBucketForOperationTypes do
-			local indexData = taskBucketForOperationTypes[j]
+			--local indexData = taskBucketForOperationTypes[j]
 			
-			if not scheduler.tasksByIntervals[indexData[1]][indexData[2]] then
-				continue
-			end
+			--if not scheduler.tasksByIntervals[indexData[1]][indexData[2]] then
+			--	continue
+			--end
 
-			local retrievedTask : customTask = scheduler.tasksByIntervals[indexData[1]][indexData[2]]
+			--local retrievedTask : customTask = scheduler.tasksByIntervals[indexData[1]][indexData[2]]
 
-			executor(retrievedTask, ct)
+			--executor(retrievedTask, ct)
 
-			local nextTick = ct + retrievedTask.interval
-			local nextRunTickBucket = scheduler.tasksByNextRunTickAndType[nextTick] or createNewTickBucket(nextTick)
-			local nextOperationBucket = nextRunTickBucket[retrievedTask.operationType] or createNewOperationBucket(nextTick, retrievedTask.operationType) 
+			--local nextTick = ct + retrievedTask.interval
+			--local nextRunTickBucket = scheduler.tasksByNextRunTickAndType[nextTick] or createNewTickBucket(nextTick)
+			--local nextOperationBucket = nextRunTickBucket[retrievedTask.operationType] or createNewOperationBucket(nextTick, retrievedTask.operationType) 
 			
-			insert(nextOperationBucket, indexData)
+			--insert(nextOperationBucket, indexData)
+			-- old fashioned way required going to two tables for one task.
+
+
 		end
 
 		scheduler.tasksByNextRunTickAndType[ct][i] = nil
@@ -222,17 +223,16 @@ end
 function onEveryFrame(ticksInThisFrame : number)
 	local difference = ticksInThisFrame - tickCountInPrevFrame
 	local didWeSkipTicks = difference > MAX_TICKS_PER_FRAME
+	local startIndex = tickCountInPrevFrame + 1
+	local endIndex = ticksInThisFrame
 	
 	if didWeSkipTicks then
 		difference = MAX_TICKS_PER_FRAME
 	end
 	
-	local internalAccumulator = tickCountInPrevFrame
-	
 	if not didWeSkipTicks then
-		for i = 1, difference do
-			internalAccumulator += 1
-			print(internalAccumulator)
+		for i = startIndex, endIndex do
+			print(i)
 
 			--[[
 				## Schedule
@@ -247,23 +247,38 @@ function onEveryFrame(ticksInThisFrame : number)
 		
 			processInputRequests()
 			processRemoteEvents()
-			processEphemeralTasks(internalAccumulator)
-			processTasksWithInterval(internalAccumulator)
+			processEphemeralTasks(i)
+			processTasksWithInterval(i)
 		end
 	else
 		local last = 0
 		local nextFrameStartTick = ticksInThisFrame + 1
-		local startIndex = tickCountInPrevFrame + 1
-		local endIndex = ticksInThisFrame - 1
 
 		for i = startIndex, endIndex do -- reschedule sh*t
 			if not scheduler.tasksByNextRunTickAndType[i] then last+=1; continue end
 
 			--swap(scheduler.tasksByNextRunTickAndType, i, nextFrameStartTick + last)
 			-- im dumb asf
-
 			
+			-- idk
+			if not scheduler.tasksByNextRunTickAndType[nextFrameStartTick + last] then
+				scheduler.tasksByNextRunTickAndType[nextFrameStartTick + last] = thisBucket
+			else
+				for i : number, bucket : {{customTask}} in pairs(thisBucket) do
+					if  scheduler.tasksByNextRunTickAndType[nextFrameStartTick + last][i] :: {{customTask}} then
+						table.move(
+							bucket, 
+							1, #bucket, 
+							# scheduler.tasksByNextRunTickAndType[nextFrameStartTick + last][i] + 1,
+							scheduler.tasksByNextRunTickAndType[nextFrameStartTick + last][i]
+						)
+					else
+						scheduler.tasksByNextRunTickAndType[nextFrameStartTick + last][i] = bucket
+					end
+				end
+			end
 
+			scheduler.tasksByNextRunTickAndType[i] = nil
 			last+=1
 		end
 	end
@@ -321,16 +336,7 @@ scheduler.addTask					= function(
 		scheduler.ephemeralTasks:enqueue(self, priority_ :: number)
 	else
 		local firstRun = tickManager.getCurrentTicks() + self.interval + 1
-
-		if not scheduler.tasksByIntervals[self.interval] then
-			scheduler.tasksByIntervals[self.interval] = {}
-		end
-
-		local idx = insert(
-			scheduler.tasksByIntervals[self.interval],
-			self
-		)
-
+		
 		if not scheduler.tasksByNextRunTickAndType[firstRun] then
 			scheduler.tasksByNextRunTickAndType[firstRun] = {}
 		end
@@ -338,9 +344,9 @@ scheduler.addTask					= function(
 			scheduler.tasksByNextRunTickAndType[firstRun][self.operationType] = {}
 		end
 
-		local idx2 = insert(
+		insert(
 			scheduler.tasksByNextRunTickAndType[firstRun][self.operationType],
-			{self.interval, idx}
+			self
 		)
 
 		__log__.new(succesfullyAddedTaskToSchedule, {self.id})
