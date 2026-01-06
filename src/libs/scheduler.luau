@@ -8,9 +8,9 @@
 	* @file		: .../management/src/libs/scheduler.lua
 	* @author	: Cod2rDude
 	* @date		: December 31 2025
-	* @lastEdit	: January 6 2025 @ 13:53
+	* @lastEdit	: January 6 2025 @ 14:49
 	* @brief	: Scheduler for scheduling tasks per tick.
-	* @version	: 1.5.1
+	* @version	: 1.6.0
 	******************************************************************************
 	* @attention
 	*
@@ -34,6 +34,11 @@
 	*						https://en.wikipedia.org/wiki/Amortized_analysis
 	*						https://coinsbench.com/swap-and-pop-algorithm-9fb85bd74d48
 	*						https://luau.org/performance#optimized-table-length
+	* @TODO					:
+	*						Promises
+	*						Tasks that will run no matter what
+	*						input, remote processing.
+	*						Some more logging.
 	******************************************************************************
 ]]
 
@@ -186,32 +191,21 @@ function processTasksWithInterval(ct : number)
 
 	local taskBucketForThisTick = scheduler.tasksByNextRunTickAndType[ct]
 
-	for i : number, taskBucketForOperationTypes : {{customTask}} in pairs(taskBucketForThisTick) do
+	for i : number, taskBucketForOperationTypes : {customTask} in pairs(taskBucketForThisTick) do
 		if #taskBucketForOperationTypes == 0 then continue end
 
 		local executorIndex = taskOperationTypeToExecutorsIndex(i)
 		if executorIndex <= 0 then continue end
 		local executor = executors[executorIndex]
 
-		for j = 1, #taskBucketForOperationTypes do
-			--local indexData = taskBucketForOperationTypes[j]
-			
-			--if not scheduler.tasksByIntervals[indexData[1]][indexData[2]] then
-			--	continue
-			--end
+		for i, v : customTask in pairs(taskBucketForOperationTypes) do
+			executor(v, ct)
 
-			--local retrievedTask : customTask = scheduler.tasksByIntervals[indexData[1]][indexData[2]]
+			local nextRun = ct + v.interval
+			local nextTickBucket = scheduler.tasksByNextRunTickAndType[nextRun] or createNewTickBucket(nextRun)
+			local nextOperationBucket = nextTickBucket[v.operationType] or createNewOperationBucket(nextRun, v.operationType)
 
-			--executor(retrievedTask, ct)
-
-			--local nextTick = ct + retrievedTask.interval
-			--local nextRunTickBucket = scheduler.tasksByNextRunTickAndType[nextTick] or createNewTickBucket(nextTick)
-			--local nextOperationBucket = nextRunTickBucket[retrievedTask.operationType] or createNewOperationBucket(nextTick, retrievedTask.operationType) 
-			
-			--insert(nextOperationBucket, indexData)
-			-- old fashioned way required going to two tables for one task.
-
-
+			nextOperationBucket[#nextOperationBucket+1] = v
 		end
 
 		scheduler.tasksByNextRunTickAndType[ct][i] = nil
@@ -257,15 +251,11 @@ function onEveryFrame(ticksInThisFrame : number)
 		for i = startIndex, endIndex do -- reschedule sh*t
 			if not scheduler.tasksByNextRunTickAndType[i] then last+=1; continue end
 
-			--swap(scheduler.tasksByNextRunTickAndType, i, nextFrameStartTick + last)
-			-- im dumb asf
-			
-			-- idk
 			if not scheduler.tasksByNextRunTickAndType[nextFrameStartTick + last] then
-				scheduler.tasksByNextRunTickAndType[nextFrameStartTick + last] = thisBucket
+				scheduler.tasksByNextRunTickAndType[nextFrameStartTick + last] = scheduler.tasksByNextRunTickAndType[i]
 			else
-				for i : number, bucket : {{customTask}} in pairs(thisBucket) do
-					if  scheduler.tasksByNextRunTickAndType[nextFrameStartTick + last][i] :: {{customTask}} then
+				for i : number, bucket : {customTask} in pairs(scheduler.tasksByNextRunTickAndType[i]) do
+					if scheduler.tasksByNextRunTickAndType[nextFrameStartTick + last][i] :: {customTask} then
 						table.move(
 							bucket, 
 							1, #bucket, 

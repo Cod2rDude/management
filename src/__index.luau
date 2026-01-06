@@ -5,7 +5,7 @@
 	* @date			:	December 31 2025
 	* @lastEdit		:	January 6 2025
 	* @brief		:	A package for managing tasks on server.
-	* @version		:	0.0.6
+	* @version		:	0.0.7
 	******************************************************************************
 	* @attention
 	*
