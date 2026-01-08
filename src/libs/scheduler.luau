@@ -1,3 +1,5 @@
+--!nolint LocalUnused
+--!nolint FunctionUnused
 --!strict
 --!native
 --!optimize 2
@@ -8,9 +10,9 @@
 	* @file		: .../management/src/libs/scheduler.lua
 	* @author	: Cod2rDude
 	* @date		: December 31 2025
-	* @lastEdit	: January 6 2025 @ 14:49
+	* @lastEdit	: January 8 2025 @ 23:10
 	* @brief	: Scheduler for scheduling tasks per tick.
-	* @version	: 1.6.0
+	* @version	: 1.7.0
 	******************************************************************************
 	* @attention
 	*
@@ -36,7 +38,6 @@
 	*						https://luau.org/performance#optimized-table-length
 	* @TODO					:
 	*						Promises
-	*						Tasks that will run no matter what
 	*						input, remote processing.
 	*						Some more logging.
 	******************************************************************************
@@ -50,8 +51,8 @@ local serverScriptService			= game:GetService"ServerScriptService"
 local __log__						= require(script.Parent.Parent.__log__.__log__)
 local config						= require(script.Parent.Parent.__config)
 local tickManager					= require(script.Parent.tickManager)
-local enums							= require(script.Parent.Parent.global.enums)
-local types							= require(script.Parent.Parent.global.types)
+local enums							= require(script.Parent.global.enums)
+local types							= require(script.Parent.global.types)
 
 local packages						= replicatedStorage.replicated.packages
 local queues						= require(packages.queues)
@@ -64,11 +65,14 @@ local MAX_EPHEMERAL_QUEUE_LIMIT		= 128
 local DEFAULT_PRIORITY				= 1
 local PRIORITY_MIN					= 0
 local PRIORITY_MAX					= MAX_EPHEMERAL_QUEUE_LIMIT
+local MAX_TASKTHATALWAYSRUN			= 4
+local RECOMMENDED_TASKSTHATALWAYSRUN= 2
 
 --// Variables
 local amIRunning					= false
 local tickCountInPrevFrame			= -1
-local taskCounter					= 0
+local taskCounter1					= 0
+local taskCounter2					= 0
 
 local actors						= serverScriptService.server.actors
 
@@ -114,16 +118,16 @@ local enum							= {
 }
 
 --// Logs
-local alreadyRunning				= 0x10
-local alreadyStopped				= 0x11
-local succesfullyInitalized			= 0x12
-local succesfullyStopped			= 0x13
-local succesfullyAddedTaskToSchedule= 0x14
-local gotAnErrorWhileExecutingTask	= 0x15
-local cantAddEphemeralTask			= 0x16
-local wrongTaskOperationType		= 0x17
---local r1							= 0x18
---local r2							= 0x19
+local alreadyRunning						= 0x10
+local alreadyStopped						= 0x11
+local succesfullyInitalized					= 0x12
+local succesfullyStopped					= 0x13
+local succesfullyAddedTaskToSchedule		= 0x14
+local gotAnErrorWhileExecutingTask			= 0x15
+local cantAddEphemeralTask					= 0x16
+local wrongTaskOperationType				= 0x17
+local reachedTasksThatAlwaysRunLimit		= 0x18
+local passingRecommendedTasksThatRunLimit	= 0x19
 --local r3							= 0x1A
 --local r4							= 0x1B
 --local r5							= 0x1C
@@ -154,6 +158,7 @@ local scheduler						= {}
 --// Lib Variables
 scheduler.ephemeralTasks			= queues_priorityMax.new(MAX_EPHEMERAL_QUEUE_LIMIT)
 scheduler.tasksByNextRunTickAndType	= {} -- idk if this was a good way.
+scheduler.tasksThatAlwaysRun		= {} -- those always run even though there is a lag, be cautious while using this.
 scheduler.inputRequests				= {}
 scheduler.remoteEvents				= {}
 
@@ -166,6 +171,16 @@ end
 function createNewOperationBucket(n, j)
 	scheduler.tasksByNextRunTickAndType[n][j] = {}
 	return scheduler.tasksByNextRunTickAndType[n][j]
+end
+
+function createNewTickBucket2(n) -- im dumb for doing it like this^^
+	scheduler.tasksThatAlwaysRun[n] = {} 
+	return scheduler.tasksThatAlwaysRun[n]
+end
+
+function createNewOperationBucket2(n, j)
+	scheduler.tasksThatAlwaysRun[n][j] = {}
+	return scheduler.tasksThatAlwaysRun[n][j]
 end
 
 function processInputRequests()
@@ -214,6 +229,34 @@ function processTasksWithInterval(ct : number)
 	scheduler.tasksByNextRunTickAndType[ct] = nil
 end
 
+function processTasksThaAlwaysRun(ct : number)
+	if not scheduler.tasksThatAlwaysRun[ct] then return end
+
+	local taskBucketForThisTick = scheduler.tasksThatAlwaysRun[ct]
+
+	for i : number, taskBucketForOperationTypes : {customTask} in pairs(taskBucketForThisTick) do
+		if #taskBucketForOperationTypes == 0 then continue end
+
+		local executorIndex = taskOperationTypeToExecutorsIndex(i)
+		if executorIndex <= 0 then continue end
+		local executor = executors[executorIndex]
+
+		for i, v : customTask in pairs(taskBucketForOperationTypes) do
+			executor(v, ct)
+
+			local nextRun = ct + v.interval
+			local nextTickBucket = scheduler.tasksThatAlwaysRun[nextRun] or createNewTickBucket(nextRun)
+			local nextOperationBucket = nextTickBucket[v.operationType] or createNewOperationBucket(nextRun, v.operationType)
+
+			nextOperationBucket[#nextOperationBucket+1] = v
+		end
+
+		scheduler.tasksThatAlwaysRun[ct][i] = nil
+	end
+
+	scheduler.tasksThatAlwaysRun[ct] = nil
+end
+
 function onEveryFrame(ticksInThisFrame : number)
 	local difference = ticksInThisFrame - tickCountInPrevFrame
 	local didWeSkipTicks = difference > MAX_TICKS_PER_FRAME
@@ -224,27 +267,33 @@ function onEveryFrame(ticksInThisFrame : number)
 		difference = MAX_TICKS_PER_FRAME
 	end
 	
-	if not didWeSkipTicks then
-		for i = startIndex, endIndex do
-			print(i)
+	for i = startIndex, endIndex do
+		print(i)
 
-			--[[
-				## Schedule
-				1. Input Requests
-				2. Remote Events
-				3. Ephemeral Tasks
-				4. Tasks That Run Every Tick
-				5. Tasks That Run Every x Tick
-
-				Essentialy 4 & 5 is same
+		--[[
+			## Schedule
+			1. Input Requests
+			2. Remote Events
+			3. Ephemeral Tasks
+			4. Tasks That Run Every Tick
+			5. Tasks That Run Every x Tick
+			
+			Essentialy 4 & 5 is same
 			]]
+
+		if #scheduler.tasksThatAlwaysRun > 0 then
+			processTasksThaAlwaysRun(i)
+		end
 		
+		if not didWeSkipTicks then
 			processInputRequests()
 			processRemoteEvents()
 			processEphemeralTasks(i)
 			processTasksWithInterval(i)
 		end
-	else
+	end
+
+	if didWeSkipTicks then
 		local last = 0
 		local nextFrameStartTick = ticksInThisFrame + 1
 
@@ -278,6 +327,57 @@ end
 
 --// Lib Functions
 
+scheduler.addTaskThatAlwaysRun	= function(
+	taskOperationType_ : number,
+	callbackOrActor_ : (ct : number, ...any) -> (...any?) | string,
+	interval_ : number
+) : string?
+	interval_ = math.max(1, interval_)
+
+	if taskOperationType_ < 1 or taskOperationType_ > enum.taskOperationType.__count then
+		__log__.new(wrongTaskOperationType, {tostring(taskOperationType_), "op: addTaskThatAlwaysRun"})
+		return nil
+	end
+
+	if #scheduler.tasksThatAlwaysRun >= MAX_TASKTHATALWAYSRUN then
+		__log__.new(reachedTasksThatAlwaysRunLimit, {})
+		return nil
+	end
+
+	if #scheduler.tasksThatAlwaysRun == RECOMMENDED_TASKSTHATALWAYSRUN then
+		__log__.new(passingRecommendedTasksThatRunLimit, {})
+	end
+
+	taskCounter1 += 1
+
+	local self				= {
+		id					= "task"..tostring(taskCounter1),
+		operationType		= taskOperationType_,
+		interval			= math.max(interval_, 0),
+		callbackOrActor		= callbackOrActor_,
+	} :: customTask
+
+	local firstRun = tickManager.getCurrentTicks() + self.interval + 1
+		
+	if not scheduler.tasksThatAlwaysRun[firstRun] then
+		scheduler.tasksThatAlwaysRun[firstRun] = {}
+	end
+	if not scheduler.tasksThatAlwaysRun[firstRun][self.operationType] then
+		scheduler.tasksThatAlwaysRun[firstRun][self.operationType] = {}
+	end
+
+	insert(
+		scheduler.tasksThatAlwaysRun[firstRun][self.operationType],
+		self
+	)
+
+	__log__.new(succesfullyAddedTaskToSchedule, {self.id})
+
+	return self.id
+end
+
+-- Please do more checks.
+
 --[[
 	@params
 	*	@param taskOperationType_ : string Operation type of that task. Check @notes for further info.
@@ -297,8 +397,6 @@ scheduler.addTask					= function(
 ) : string?
 	local isMyIntervalLessOrEqualToZero = interval_ <= 0
 
-	--TODO: log here
-
 	if isMyIntervalLessOrEqualToZero and scheduler.ephemeralTasks:size() >= MAX_EPHEMERAL_QUEUE_LIMIT then
 		__log__.new(cantAddEphemeralTask, {})
 		return nil
@@ -311,10 +409,10 @@ scheduler.addTask					= function(
 
 	-- i need a priority queue that lets me look at object with x'nd priority without removing it.
 
-	taskCounter += 1
+	taskCounter1 += 1
 
 	local self				= {
-		id					= "task"..tostring(taskCounter),
+		id					= "task"..tostring(taskCounter1),
 		operationType		= taskOperationType_,
 		interval			= math.max(interval_, 0),
 		callbackOrActor		= callbackOrActor_,
